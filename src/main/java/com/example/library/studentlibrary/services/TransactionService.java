@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -46,7 +47,52 @@ public class TransactionService {
 
         //Note that the error message should match exactly in all cases
 
-       return null; //return transactionId instead
+        Card card = cardRepository5.findById(cardId).get();
+        Book book = bookRepository5.findById(bookId).get();
+
+        if(book == null && book.isAvailable() == false){
+            throw new Exception("Book is either unavailable or not present");
+        }
+
+        if(card == null || card.getCardStatus().equals(CardStatus.DEACTIVATED)){
+            throw new Exception("Card is invalid");
+        }
+
+        else if(card.getBooks().size() > max_allowed_books){
+            throw new Exception("Book limit has reached for this card");
+        }
+
+        else {
+            book.setCard(card);
+            if(card.getBooks() == null){
+                List<Book> books = new ArrayList<>();
+                books.add(book);
+                card.setBooks(books);
+            }
+            else {
+                card.getBooks().add(book);
+            }
+
+            Transaction transaction = Transaction.builder().
+                    book(book).card(card).isIssueOperation(true).fineAmount(0).transactionStatus(TransactionStatus.SUCCESSFUL).
+                    build();
+
+            book.setAvailable(false);
+            bookRepository5.updateBook(book);
+
+            if(book.getTransactions() == null){
+                ArrayList<Transaction> transactions = new ArrayList<>();
+                transactions.add(transaction);
+                book.setTransactions(transactions);
+            }
+            else {
+                book.getTransactions().add(transaction);
+            }
+
+            transactionRepository5.save(transaction);
+            return transaction.getTransactionId();
+            
+        }
     }
 
     public Transaction returnBook(int cardId, int bookId) throws Exception{
@@ -54,11 +100,30 @@ public class TransactionService {
         List<Transaction> transactions = transactionRepository5.find(cardId, bookId,TransactionStatus.SUCCESSFUL, true);
         Transaction transaction = transactions.get(transactions.size() - 1);
 
-        //for the given transaction calculate the fine amount considering the book has been returned exactly when this function is called
-        //make the book available for other users
-        //make a new transaction for return book which contains the fine amount as well
+        Date date = transaction.getTransactionDate();
+        Date currDate = new Date();
 
-        Transaction returnBookTransaction  = null;
-        return returnBookTransaction; //return the transaction after updating all details
+        long delayTime = currDate.getTime() - date.getTime();
+
+        long delayDays = (delayTime / (1000 * 60 * 60 * 24)) % 365;
+
+        int fine = 0;
+
+        if(delayDays > getMax_allowed_days){
+            int fineDays = (int)(getMax_allowed_days - delayDays);
+            fine = -1 * fineDays * fine_per_day;
+        }
+
+        Book book = transaction.getBook();
+        book.setAvailable(true);
+        bookRepository5.updateBook(book);
+
+        Transaction returnedBook = Transaction.builder().
+                book(book).card(transaction.getCard()).
+                isIssueOperation(true).fineAmount(fine).
+                transactionStatus(TransactionStatus.SUCCESSFUL).build();
+
+        transactionRepository5.save(returnedBook);
+        return returnedBook;
     }
 }
